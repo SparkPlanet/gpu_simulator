@@ -1,0 +1,55 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "EDA_GPU_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "cpu-debug",
+      "inherits": "base",
+      "displayName": "CPU debug and correctness",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "EDA_GPU_ENABLE_NGSPICE": "ON",
+        "NGSPICE_EXECUTABLE": "${sourceDir}/build/tools/ngspice/bin/ngspice"
+      }
+    },
+    {
+      "name": "cpu-release",
+      "inherits": "base",
+      "displayName": "CPU release build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EDA_GPU_ENABLE_NGSPICE": "ON",
+        "NGSPICE_EXECUTABLE": "${sourceDir}/build/tools/ngspice/bin/ngspice"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "cpu-debug", "configurePreset": "cpu-debug" },
+    { "name": "cpu-release", "configurePreset": "cpu-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "cpu-debug",
+      "configurePreset": "cpu-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "cpu-release",
+      "configurePreset": "cpu-release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+* Deterministic RC low-pass smoke case for the CPU benchmark harness.
+Vinput in 0 PULSE(0 1 0 100p 100p 20n 40n)
+Rseries in out 1k
+Cload out 0 1p
+
+.options klu
+.tran 0.1n 10n
+.measure tran vout_final FIND v(out) AT=10n
+.measure tran vout_peak MAX v(out) FROM=0n TO=10n
+.end
+
