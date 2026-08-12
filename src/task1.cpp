@@ -1,4 +1,4 @@
-#include "eda_gpu/task1.hpp"
+#include "task1.hpp"
 
 #include <cmath>
 #include <memory>

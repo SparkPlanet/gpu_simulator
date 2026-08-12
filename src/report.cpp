@@ -1,4 +1,4 @@
-#include "eda_gpu/report.hpp"
+#include "report.hpp"
 
 #include <algorithm>
 #include <iomanip>

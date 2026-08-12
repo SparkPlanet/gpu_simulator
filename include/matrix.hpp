@@ -9,7 +9,7 @@ namespace eda_gpu {
 
 using SparseIndex = std::int32_t;
 
-// Task 1 uses one canonical host representation: a square, real CSC matrix.
+// Canonical Task 1 host representation: a square, real CSC matrix.
 // Indices in every column are sorted and unique. Backends may build their own
 // device format, but that representation never leaks through the public API.
 struct CscMatrix {

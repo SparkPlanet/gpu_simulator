@@ -1,4 +1,4 @@
-#include "eda_gpu/matrix.hpp"
+#include "matrix.hpp"
 
 #include <algorithm>
 #include <cctype>

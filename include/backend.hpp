@@ -1,8 +1,8 @@
 #pragma once
 
-#include "eda_gpu/executor.hpp"
-#include "eda_gpu/matrix.hpp"
-#include "eda_gpu/profiler.hpp"
+#include "executor.hpp"
+#include "matrix.hpp"
+#include "profiler.hpp"
 
 #include <map>
 #include <memory>

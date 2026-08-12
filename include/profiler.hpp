@@ -77,7 +77,7 @@ struct EventSummary {
     std::uint64_t synchronization_calls{};
 };
 
-// A small PETSc-style hierarchical logger. Wall time is measured on the host;
+// PETSc-style hierarchical logger. Wall time is measured on the host;
 // asynchronous device time must be supplied by a backend using add_device_time.
 // Keeping the two clocks separate prevents GPU work from being double counted.
 class Profiler {

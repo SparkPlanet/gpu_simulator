@@ -1,4 +1,4 @@
-#include "eda_gpu/executor.hpp"
+#include "executor.hpp"
 
 #include <cstring>
 #include <new>

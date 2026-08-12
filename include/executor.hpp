@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eda_gpu/profiler.hpp"
+#include "profiler.hpp"
 
 #include <cstddef>
 #include <cstdint>

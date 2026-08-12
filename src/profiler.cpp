@@ -1,4 +1,4 @@
-#include "eda_gpu/profiler.hpp"
+#include "profiler.hpp"
 
 #include <algorithm>
 #include <map>

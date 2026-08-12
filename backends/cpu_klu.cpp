@@ -1,4 +1,4 @@
-#include "eda_gpu/backend.hpp"
+#include "backend.hpp"
 
 extern "C" {
 #include "ngspice/klu.h"

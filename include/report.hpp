@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eda_gpu/task1.hpp"
+#include "task1.hpp"
 
 #include <string>
 

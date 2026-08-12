@@ -1,7 +1,7 @@
-#include "eda_gpu/executor.hpp"
-#include "eda_gpu/matrix.hpp"
-#include "eda_gpu/report.hpp"
-#include "eda_gpu/task1.hpp"
+#include "executor.hpp"
+#include "matrix.hpp"
+#include "report.hpp"
+#include "task1.hpp"
 
 #include <cmath>
 #include <cstring>
