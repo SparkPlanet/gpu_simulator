@@ -30,11 +30,33 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "cuda-debug",
+      "inherits": "base",
+      "displayName": "Task 1 CUDA debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CUDA_ARCHITECTURES": "80;86;89",
+        "EDA_GPU_ENABLE_CUDA": "ON"
+      }
+    },
+    {
+      "name": "cuda-release",
+      "inherits": "base",
+      "displayName": "Task 1 CUDA release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_ARCHITECTURES": "80;86;89",
+        "EDA_GPU_ENABLE_CUDA": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "cpu-debug", "configurePreset": "cpu-debug" },
-    { "name": "cpu-release", "configurePreset": "cpu-release" }
+    { "name": "cpu-release", "configurePreset": "cpu-release" },
+    { "name": "cuda-debug", "configurePreset": "cuda-debug" },
+    { "name": "cuda-release", "configurePreset": "cuda-release" }
   ],
   "testPresets": [
     {
@@ -45,6 +67,16 @@
     {
       "name": "cpu-release",
       "configurePreset": "cpu-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "cuda-debug",
+      "configurePreset": "cuda-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "cuda-release",
+      "configurePreset": "cuda-release",
       "output": { "outputOnFailure": true }
     }
   ]

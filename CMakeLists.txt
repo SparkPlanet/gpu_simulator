@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(eda_gpu_task1 VERSION 1.0.0 LANGUAGES C CXX)
 
 option(EDA_GPU_BUILD_TESTS "Build Task 1 infrastructure tests" ON)
+option(EDA_GPU_ENABLE_CUDA "Build the Task 1 CUDA backend" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,13 +67,38 @@ add_library(eda_task1 STATIC
     backends/cpu_klu.cpp
     backends/reference_lu.cpp
 )
+
+if(EDA_GPU_ENABLE_CUDA)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(NOT CMAKE_CUDA_COMPILER)
+        message(FATAL_ERROR "EDA_GPU_ENABLE_CUDA=ON but nvcc was not found")
+    endif()
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89" CACHE STRING
+            "CUDA architectures for Task 1 kernels")
+    endif()
+    target_sources(eda_task1 PRIVATE
+        backends/cuda_executor.cu
+        backends/cuda_lu.cu
+    )
+    target_compile_definitions(eda_task1 PRIVATE EDA_GPU_HAS_CUDA=1)
+    target_link_libraries(eda_task1 PRIVATE CUDA::cudart)
+    set_target_properties(eda_task1 PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED YES
+    )
+endif()
 target_include_directories(eda_task1
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_link_libraries(eda_task1 PRIVATE task1_klu m)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(eda_task1 PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(eda_task1 PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>)
 endif()
 
 add_executable(task1_benchmark benchmark/task1_benchmark.cpp)
