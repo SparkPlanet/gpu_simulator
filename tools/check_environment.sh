@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -u
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "${script_dir}/.." && pwd)"
+
 status=0
 
 check_command() {
@@ -19,37 +22,18 @@ check_command cc
 check_command c++
 
 echo
-echo "ngspice CPU baseline"
-project_ngspice="./build/tools/ngspice/bin/ngspice"
-if [[ ! -x "${project_ngspice}" ]]; then
-    echo "MISSING: ${project_ngspice}"
-    echo "Run ./tools/build_ngspice.sh first."
-    status=1
-    ngspice_version=""
+echo "Task 1 CPU baseline"
+klu_header="${project_root}/third_party/ngspice/src/include/ngspice/klu.h"
+klu_source="${project_root}/third_party/ngspice/src/maths/KLU/klu_factor.c"
+if [[ -f "${klu_header}" && -f "${klu_source}" ]]; then
+    echo "vendored KLU: available"
 else
-    ngspice_version="$("${project_ngspice}" --version 2>&1)"
-fi
-if printf '%s\n' "${ngspice_version}" | grep -q "KLU Direct Linear Solver"; then
-    printf '%s\n' "${ngspice_version}" | grep -E 'ngspice-|KLU Direct Linear Solver'
-else
-    echo "ngspice is present but KLU support is missing."
+    echo "vendored KLU: MISSING"
     status=1
 fi
 
 echo
-echo "CUDA operator/reference layer (required by cuda-debug/cuda-release presets)"
-if command -v nvcc >/dev/null 2>&1; then
-    nvcc --version | tail -n 1
-else
-    echo "nvcc: MISSING (CPU presets remain available)"
-fi
-if command -v nvidia-smi >/dev/null 2>&1; then
-    if ! nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap \
-        --format=csv,noheader; then
-        echo "NVIDIA GPU is not visible in the current sandbox/device namespace."
-    fi
-else
-    echo "nvidia-smi: MISSING (CPU presets remain available)"
-fi
+echo "Current presets"
+cmake --list-presets 2>/dev/null || status=1
 
 exit "${status}"
