@@ -4,6 +4,7 @@ project(eda_gpu_spice VERSION 0.3.0 LANGUAGES C CXX)
 
 option(EDA_GPU_BUILD_TESTS "Build tests" ON)
 option(EDA_GPU_ENABLE_NGSPICE "Build the ngspice interface" ON)
+option(EDA_GPU_ENABLE_CUDA "Build CUDA operators and reference adapters" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,11 +79,44 @@ set_target_properties(ngspice_klu PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED Y
 
 add_library(eda_core STATIC
     core/matrix.cpp
-    core/klu_solver.cpp
     core/registry.cpp
+    operators/cpu/klu_solver.cpp
 )
-target_include_directories(eda_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/core")
+target_include_directories(eda_core
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/core"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 target_link_libraries(eda_core PRIVATE ngspice_klu m)
+
+if(EDA_GPU_ENABLE_CUDA)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(NOT CMAKE_CUDA_COMPILER)
+        message(FATAL_ERROR "EDA_GPU_ENABLE_CUDA=ON but no CUDA compiler was found")
+    endif()
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES "75;80;86" CACHE STRING
+            "CUDA architectures for project operators")
+    endif()
+    target_sources(eda_core PRIVATE
+        bridge/gpu_hybrid_solver.cpp
+        bridge/cuda_custom_adapter.cpp
+        bridge/cuda_reference_adapter.cpp
+        operators/cpu/klu_initialization.cpp
+        operators/cuda/fixed_pattern_lu.cu
+        operators/cuda/fixed_pattern_lu_kernels.cuh
+        operators/cuda/fixed_pattern_lu_runtime.cuh
+        operators/cuda/cusolverrf_reference.cu
+    )
+    target_compile_definitions(eda_core PRIVATE EDA_GPU_HAS_CUDA=1)
+    target_link_libraries(eda_core PRIVATE CUDA::cudart CUDA::cusolver)
+    set_target_properties(eda_core PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED YES
+    )
+endif()
 
 add_executable(solver_benchmark interface/solver_benchmark.cpp)
 target_link_libraries(solver_benchmark PRIVATE eda_core)
@@ -105,11 +139,22 @@ if(EDA_GPU_BUILD_TESTS)
     enable_testing()
 
     add_test(NAME solver_generated
-        COMMAND solver_benchmark --solver klu --grid 8 --warmup 0 --iterations 1)
+        COMMAND solver_benchmark --solver klu --grid 8)
     add_test(NAME solver_circuit_case
-        COMMAND solver_benchmark --solver klu --case asic_320k --warmup 0 --iterations 1)
+        COMMAND solver_benchmark --solver klu --case asic_320k)
     set_tests_properties(solver_generated solver_circuit_case
         PROPERTIES LABELS "core;cpu;klu")
+
+    if(EDA_GPU_ENABLE_CUDA)
+        add_test(NAME solver_cuda_custom_generated
+            COMMAND solver_benchmark --solver cuda
+                    --grid 8)
+        add_test(NAME solver_cuda_reference_generated
+            COMMAND solver_benchmark --solver cuda-cusolverrf-reference
+                    --grid 8)
+        set_tests_properties(solver_cuda_custom_generated solver_cuda_reference_generated
+            PROPERTIES LABELS "core;cuda;gpu")
+    endif()
 
     if(EDA_GPU_ENABLE_NGSPICE)
         add_test(NAME ngspice_interface

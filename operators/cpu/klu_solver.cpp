@@ -1,11 +1,14 @@
-#include "solver.hpp"
+#include "core/solver.hpp"
 
 extern "C" {
 #include "ngspice/klu.h"
 }
 
+#include <cstdint>
+#include <memory>
 #include <stdexcept>
-#include <utility>
+#include <string>
+#include <vector>
 
 namespace eda_gpu::core {
 namespace {
@@ -48,18 +51,6 @@ public:
         }
     }
 
-    void refactorize(const CscMatrix& matrix) override {
-        require_pattern(matrix);
-        if (numeric_ == nullptr) {
-            throw std::runtime_error("klu refactorize requires an initial factorization");
-        }
-        if (klu_refactor(column_offsets_.data(), row_indices_.data(),
-                         const_cast<double*>(matrix.values.data()), symbolic_, numeric_,
-                         &common_) == 0 || common_.status != KLU_OK) {
-            throw_status("klu_refactor");
-        }
-    }
-
     [[nodiscard]] std::vector<double> solve(
         const std::vector<double>& right_hand_side) override {
         if (symbolic_ == nullptr || numeric_ == nullptr) {
@@ -84,7 +75,8 @@ private:
         if (matrix.rows != rows_ || matrix.columns != rows_ ||
             matrix.column_offsets != column_offsets_ || matrix.row_indices != row_indices_ ||
             matrix.values.size() != row_indices_.size()) {
-            throw std::runtime_error("refactorization matrix must preserve the analyzed CSC pattern");
+            throw std::runtime_error(
+                "factorization matrix must preserve the analyzed CSC pattern");
         }
     }
 
@@ -94,15 +86,11 @@ private:
     }
 
     void reset_numeric() noexcept {
-        if (numeric_ != nullptr) {
-            klu_free_numeric(&numeric_, &common_);
-        }
+        if (numeric_ != nullptr) klu_free_numeric(&numeric_, &common_);
     }
 
     void reset_symbolic() noexcept {
-        if (symbolic_ != nullptr) {
-            klu_free_symbolic(&symbolic_, &common_);
-        }
+        if (symbolic_ != nullptr) klu_free_symbolic(&symbolic_, &common_);
     }
 
     klu_common common_{};

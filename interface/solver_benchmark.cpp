@@ -26,6 +26,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using eda_gpu::core::CscMatrix;
+using eda_gpu::core::SolverMetrics;
 
 struct Options {
     std::string solver{"klu"};
@@ -33,8 +34,7 @@ struct Options {
     std::optional<std::filesystem::path> matrix;
     std::optional<std::filesystem::path> rhs;
     std::optional<std::int32_t> grid;
-    std::int32_t warmup{1};
-    std::int32_t iterations{5};
+    std::int32_t iterations{1};
     double tolerance{1e-6};
     std::optional<std::filesystem::path> output;
     bool list_solvers{};
@@ -78,6 +78,50 @@ struct Summary {
     double maximum{};
 };
 
+struct BackendSamples {
+    std::vector<double> cpu_bootstrap_factor;
+    std::vector<double> gpu_setup;
+    std::vector<double> numeric_factor_cpu_prepare;
+    std::vector<double> numeric_factor_h2d;
+    std::vector<double> numeric_factor_kernel;
+    std::vector<double> numeric_factor_status_d2h;
+    std::vector<double> solve_cpu_prepare;
+    std::vector<double> solve_h2d;
+    std::vector<double> solve_kernel;
+    std::vector<double> solve_d2h;
+    std::vector<double> solve_cpu_finalize;
+
+    void reserve(std::size_t count) {
+        cpu_bootstrap_factor.reserve(count);
+        gpu_setup.reserve(count);
+        numeric_factor_cpu_prepare.reserve(count);
+        numeric_factor_h2d.reserve(count);
+        numeric_factor_kernel.reserve(count);
+        numeric_factor_status_d2h.reserve(count);
+        solve_cpu_prepare.reserve(count);
+        solve_h2d.reserve(count);
+        solve_kernel.reserve(count);
+        solve_d2h.reserve(count);
+        solve_cpu_finalize.reserve(count);
+    }
+
+    void push(const SolverMetrics& metrics) {
+        cpu_bootstrap_factor.push_back(metrics.last_cpu_bootstrap_factor_ms);
+        gpu_setup.push_back(metrics.last_gpu_setup_ms);
+        numeric_factor_cpu_prepare.push_back(
+            metrics.last_numeric_factor_cpu_prepare_ms);
+        numeric_factor_h2d.push_back(metrics.last_numeric_factor_h2d_ms);
+        numeric_factor_kernel.push_back(metrics.last_numeric_factor_kernel_ms);
+        numeric_factor_status_d2h.push_back(
+            metrics.last_numeric_factor_status_d2h_ms);
+        solve_cpu_prepare.push_back(metrics.last_solve_cpu_prepare_ms);
+        solve_h2d.push_back(metrics.last_solve_h2d_ms);
+        solve_kernel.push_back(metrics.last_solve_kernel_ms);
+        solve_d2h.push_back(metrics.last_solve_d2h_ms);
+        solve_cpu_finalize.push_back(metrics.last_solve_cpu_finalize_ms);
+    }
+};
+
 [[nodiscard]] std::int32_t parse_integer(std::string_view text, std::string_view option) {
     std::size_t consumed{};
     const auto value = std::stoll(std::string(text), &consumed);
@@ -108,8 +152,6 @@ struct Summary {
             options.rhs = value_after(index, argument);
         } else if (argument == "--grid") {
             options.grid = parse_integer(value_after(index, argument), argument);
-        } else if (argument == "--warmup") {
-            options.warmup = parse_integer(value_after(index, argument), argument);
         } else if (argument == "--iterations") {
             options.iterations = parse_integer(value_after(index, argument), argument);
         } else if (argument == "--tolerance") {
@@ -145,9 +187,10 @@ struct Summary {
         if (options.case_name && options.rhs) {
             throw std::runtime_error("--case already selects its matching RHS");
         }
-        if (options.warmup < 0 || options.iterations <= 0 ||
+        if (options.iterations <= 0 ||
             !std::isfinite(options.tolerance) || options.tolerance <= 0.0) {
-            throw std::runtime_error("warmup must be >= 0; iterations and tolerance must be > 0");
+            throw std::runtime_error(
+                "iterations and tolerance must be greater than zero");
         }
     }
     return options;
@@ -156,13 +199,12 @@ struct Summary {
 void print_help(std::ostream& output) {
     output <<
         "Usage: solver_benchmark [options]\n"
-        "  --solver NAME       klu, cuda or metax (default: klu)\n"
+        "  --solver NAME       klu or a registered accelerator backend (default: klu)\n"
         "  --case NAME         bundled circuit matrix and RHS\n"
         "  --matrix FILE       Matrix Market coordinate matrix\n"
         "  --rhs FILE          Matrix Market right-hand side (array or coordinate)\n"
         "  --grid N            generate an N-by-N 2D Poisson grid\n"
-        "  --warmup N          unreported refactor+solve runs (default: 1)\n"
-        "  --iterations N      measured refactor+solve runs (default: 5)\n"
+        "  --iterations N      independent Task 1 cold solves (default: 1)\n"
         "  --tolerance VALUE   relative solution error limit (default: 1e-6)\n"
         "  --output FILE       write JSON to a file instead of stdout\n"
         "  --list-solvers      show registered adapters\n"
@@ -186,6 +228,15 @@ template <typename Callable>
     return {std::accumulate(samples.begin(), samples.end(), 0.0) /
                 static_cast<double>(samples.size()),
             median, sorted.front(), sorted.back()};
+}
+
+[[nodiscard]] double effective_gflops(
+    std::uint64_t estimated_flops,
+    const std::vector<double>& kernel_ms_samples) {
+    if (estimated_flops == 0U || kernel_ms_samples.empty()) return 0.0;
+    const auto mean_ms = summarize(kernel_ms_samples).mean;
+    if (!(mean_ms > 0.0)) return 0.0;
+    return static_cast<double>(estimated_flops) / (mean_ms * 1.0e6);
 }
 
 [[nodiscard]] double relative_residual(
@@ -250,16 +301,83 @@ void write_timing(
     std::ostream& output,
     std::string_view name,
     const std::vector<double>& samples,
-    bool trailing_comma) {
+    bool trailing_comma,
+    std::size_t indentation = 4U) {
     const auto summary = summarize(samples);
-    output << "    \"" << name << "\": {\n"
-           << "      \"mean\": " << summary.mean << ",\n"
-           << "      \"median\": " << summary.median << ",\n"
-           << "      \"min\": " << summary.minimum << ",\n"
-           << "      \"max\": " << summary.maximum << ",\n"
-           << "      \"samples\": ";
+    const std::string outer(indentation, ' ');
+    const std::string inner(indentation + 2U, ' ');
+    output << outer << "\"" << name << "\": {\n"
+           << inner << "\"mean\": " << summary.mean << ",\n"
+           << inner << "\"median\": " << summary.median << ",\n"
+           << inner << "\"min\": " << summary.minimum << ",\n"
+           << inner << "\"max\": " << summary.maximum << ",\n"
+           << inner << "\"samples\": ";
     write_samples(output, samples);
-    output << "\n    }" << (trailing_comma ? "," : "") << '\n';
+    output << '\n' << outer << '}' << (trailing_comma ? "," : "") << '\n';
+}
+
+void write_level_width_profile(
+    std::ostream& output,
+    std::string_view name,
+    const eda_gpu::core::LevelWidthProfile& profile,
+    bool trailing_comma) {
+    output << "      \"" << name << "\": {\n"
+           << "        \"levels\": " << profile.levels << ",\n"
+           << "        \"width_1\": " << profile.width_1 << ",\n"
+           << "        \"width_2\": " << profile.width_2 << ",\n"
+           << "        \"width_3_to_8\": " << profile.width_3_to_8 << ",\n"
+           << "        \"width_9_to_32\": " << profile.width_9_to_32 << ",\n"
+           << "        \"width_33_plus\": " << profile.width_33_plus << ",\n"
+           << "        \"widest\": " << profile.widest << "\n"
+           << "      }" << (trailing_comma ? "," : "") << "\n";
+}
+
+void write_refactor_dag_profile(
+    std::ostream& output,
+    const eda_gpu::core::NumericFactorDagProfile& profile) {
+    output << "    \"numeric_factor_dag\": {\n"
+           << "      \"available\": " << (profile.available ? "true" : "false");
+    if (!profile.available) {
+        output << "\n    },\n";
+        return;
+    }
+    output << ",\n";
+    write_level_width_profile(
+        output, "u_dependency_levels", profile.u_dependency_levels, true);
+    write_level_width_profile(
+        output, "glu3_relaxed_levels", profile.glu3_relaxed_levels, true);
+    output << "      \"right_looking\": {\n"
+           << "        \"subcolumn_tasks\": " << profile.subcolumn_tasks << ",\n"
+           << "        \"scalar_updates\": " << profile.scalar_updates << ",\n"
+           << "        \"single_level_subcolumn_tasks\": "
+           << profile.single_level_subcolumn_tasks << ",\n"
+           << "        \"single_level_scalar_updates\": "
+           << profile.single_level_scalar_updates << ",\n"
+           << "        \"single_level_scalar_update_fraction\": "
+           << profile.single_level_scalar_update_fraction << ",\n"
+           << "        \"single_level_fanout\": {\"p50\": "
+           << profile.single_level_fanout_p50 << ", \"p90\": "
+           << profile.single_level_fanout_p90 << ", \"p99\": "
+           << profile.single_level_fanout_p99 << ", \"max\": "
+           << profile.single_level_fanout_max << "},\n"
+           << "        \"same_level_collision_groups\": "
+           << profile.same_level_collision_groups << ",\n"
+           << "        \"same_level_conflicting_tasks\": "
+           << profile.same_level_conflicting_tasks << ",\n"
+           << "        \"same_level_extra_writers\": "
+           << profile.same_level_extra_writers << ",\n"
+           << "        \"same_level_max_writers\": "
+           << profile.same_level_max_writers << ",\n"
+           << "        \"full_index_bytes_u32\": "
+           << profile.full_index_bytes_u32 << ",\n"
+           << "        \"full_index_bytes_mixed_u16_u32\": "
+           << profile.full_index_bytes_mixed_u16_u32 << ",\n"
+           << "        \"single_level_index_bytes_mixed_u16_u32\": "
+           << profile.single_level_index_bytes_mixed_u16_u32 << ",\n"
+           << "        \"dense_workspace_bytes_per_block\": "
+           << profile.dense_workspace_bytes_per_block << "\n"
+           << "      }\n"
+           << "    },\n";
 }
 
 }  // namespace
@@ -300,40 +418,67 @@ int main(int argc, char** argv) {
                     *options.rhs, input.matrix.rows);
             }
         });
-        auto solver = eda_gpu::core::create_solver(options.solver);
         std::vector<double> reference_solution;
         if (!options.rhs) {
             reference_solution.assign(static_cast<std::size_t>(input.matrix.columns), 1.0);
             right_hand_side = eda_gpu::core::multiply(input.matrix, reference_solution);
         }
 
-        const auto initial_start = Clock::now();
-        const auto analyze_ms = timed_ms([&] { solver->analyze(input.matrix); });
-        const auto initial_factor_ms = timed_ms([&] { solver->factorize(input.matrix); });
+        std::unique_ptr<eda_gpu::core::LinearSolver> solver;
         std::vector<double> solution;
-        const auto initial_solve_ms = timed_ms([&] { solution = solver->solve(right_hand_side); });
-        const auto initial_total_ms = std::chrono::duration<double, std::milli>(
-                                          Clock::now() - initial_start)
-                                          .count();
-
-        for (std::int32_t iteration = 0; iteration < options.warmup; ++iteration) {
-            solver->refactorize(input.matrix);
-            solution = solver->solve(right_hand_side);
-        }
-
-        std::vector<double> refactor_samples;
+        SolverMetrics initial_backend_metrics;
+        std::vector<double> create_samples;
+        std::vector<double> analyze_samples;
+        std::vector<double> factor_samples;
         std::vector<double> solve_samples;
         std::vector<double> total_samples;
-        refactor_samples.reserve(static_cast<std::size_t>(options.iterations));
-        solve_samples.reserve(static_cast<std::size_t>(options.iterations));
-        total_samples.reserve(static_cast<std::size_t>(options.iterations));
+        std::vector<double> process_cold_total_samples;
+        BackendSamples backend_samples;
+
+        const auto sample_count = static_cast<std::size_t>(options.iterations);
+        create_samples.reserve(sample_count);
+        analyze_samples.reserve(sample_count);
+        factor_samples.reserve(sample_count);
+        solve_samples.reserve(sample_count);
+        total_samples.reserve(sample_count);
+        process_cold_total_samples.reserve(sample_count);
+        backend_samples.reserve(sample_count);
+
         for (std::int32_t iteration = 0; iteration < options.iterations; ++iteration) {
-            const auto total_start = Clock::now();
-            refactor_samples.push_back(timed_ms([&] { solver->refactorize(input.matrix); }));
-            solve_samples.push_back(timed_ms([&] { solution = solver->solve(right_hand_side); }));
-            total_samples.push_back(std::chrono::duration<double, std::milli>(
-                                        Clock::now() - total_start)
-                                        .count());
+            // A fresh solver per sample enforces Task 1 semantics: no symbolic
+            // pattern, device allocation or numerical factor is reused.
+            solver.reset();
+            const auto process_start = Clock::now();
+            double create_ms{};
+            auto current_solver = std::unique_ptr<eda_gpu::core::LinearSolver>{};
+            create_ms = timed_ms([&] {
+                current_solver = eda_gpu::core::create_solver(options.solver);
+            });
+            const auto task1_start = Clock::now();
+            const auto analyze_ms = timed_ms(
+                [&] { current_solver->analyze(input.matrix); });
+            const auto factor_ms = timed_ms(
+                [&] { current_solver->factorize(input.matrix); });
+            const auto solve_ms = timed_ms(
+                [&] { solution = current_solver->solve(right_hand_side); });
+            const auto metrics = current_solver->metrics();
+            const auto task1_total_ms = std::chrono::duration<double, std::milli>(
+                                            Clock::now() - task1_start)
+                                            .count();
+            const auto process_cold_total_ms =
+                std::chrono::duration<double, std::milli>(
+                    Clock::now() - process_start)
+                    .count();
+
+            create_samples.push_back(create_ms);
+            analyze_samples.push_back(analyze_ms);
+            factor_samples.push_back(factor_ms);
+            solve_samples.push_back(solve_ms);
+            total_samples.push_back(task1_total_ms);
+            process_cold_total_samples.push_back(process_cold_total_ms);
+            backend_samples.push(metrics);
+            solver = std::move(current_solver);
+            initial_backend_metrics = metrics;
         }
 
         // Keep the untimed CPU reference solve after the target measurements so it cannot
@@ -356,8 +501,9 @@ int main(int argc, char** argv) {
         std::ostringstream json;
         json << std::setprecision(17)
              << "{\n"
-             << "  \"schema_version\": 2,\n"
+             << "  \"schema_version\": 9,\n"
              << "  \"status\": \"ok\",\n"
+             << "  \"benchmark_mode\": \"task1\",\n"
              << "  \"solver\": \"" << json_escape(solver->name()) << "\",\n"
              << "  \"case\": \""
              << json_escape(options.case_name ? *options.case_name : "custom") << "\",\n"
@@ -368,18 +514,79 @@ int main(int argc, char** argv) {
              << "  \"matrix\": {\"rows\": " << input.matrix.rows
              << ", \"columns\": " << input.matrix.columns
              << ", \"nnz\": " << input.matrix.nonzeros() << "},\n"
-             << "  \"warmup\": " << options.warmup << ",\n"
              << "  \"iterations\": " << options.iterations << ",\n"
-             << "  \"timing_scope\": \"host API; input generation/loading and validation excluded from solver phases\",\n"
+             << "  \"timing_scope\": \"task1_total is host wall-clock from analyze through returned solution and includes per-matrix CPU preparation, allocation, transfers, GPU work and synchronization; process_cold_total additionally includes solver/CUDA runtime creation; matrix file loading and post-solve validation are excluded\",\n"
              << "  \"timing_ms\": {\n"
-             << "    \"load\": " << load_ms << ",\n"
-             << "    \"analyze\": " << analyze_ms << ",\n"
-             << "    \"initial_factor\": " << initial_factor_ms << ",\n"
-             << "    \"initial_solve\": " << initial_solve_ms << ",\n";
-        json << "    \"initial_total\": " << initial_total_ms << ",\n";
-        write_timing(json, "refactor", refactor_samples, true);
-        write_timing(json, "solve", solve_samples, true);
-        write_timing(json, "refactor_solve_total", total_samples, false);
+             << "    \"load_excluded_from_solver_total\": " << load_ms << ",\n";
+        write_timing(json, "solver_create", create_samples, true);
+        write_timing(json, "symbolic_analysis", analyze_samples, true);
+        write_timing(json, "numeric_factorization_and_setup", factor_samples, true);
+        write_timing(json, "triangular_solve", solve_samples, true);
+        write_timing(json, "task1_total", total_samples, true);
+        write_timing(json, "process_cold_total_including_solver_create",
+                     process_cold_total_samples, false);
+        json << "  },\n"
+             << "  \"backend\": {\n"
+             << "    \"execution_model\": \""
+             << json_escape(initial_backend_metrics.execution_model) << "\",\n"
+             << "    \"schedule_mode\": \""
+             << json_escape(initial_backend_metrics.schedule_mode) << "\",\n"
+             << "    \"numeric_factor_mode\": \""
+             << json_escape(initial_backend_metrics.numeric_factor_mode) << "\",\n"
+             << "    \"gpu_compute\": "
+             << (initial_backend_metrics.gpu_compute ? "true" : "false") << ",\n"
+             << "    \"device_memory_bytes\": "
+             << initial_backend_metrics.device_memory_bytes << ",\n"
+             << "    \"device_memory_scope\": \"operator-owned live allocations after setup; exact for the project CUDA backend\",\n"
+             << "    \"estimated_numeric_factor_flops\": "
+             << initial_backend_metrics.estimated_numeric_factor_flops << ",\n"
+             << "    \"estimated_triangular_solve_flops\": "
+             << initial_backend_metrics.estimated_triangular_solve_flops << ",\n"
+             << "    \"numeric_factor_effective_gflops\": "
+             << effective_gflops(
+                    initial_backend_metrics.estimated_numeric_factor_flops,
+                    backend_samples.numeric_factor_kernel)
+             << ",\n"
+             << "    \"triangular_solve_effective_gflops\": "
+             << effective_gflops(
+                    initial_backend_metrics.estimated_triangular_solve_flops,
+                    backend_samples.solve_kernel)
+             << ",\n"
+             << "    \"schedule_operations\": "
+             << initial_backend_metrics.schedule_operations << ",\n"
+             << "    \"backend_calls_per_solve\": "
+             << initial_backend_metrics.backend_calls_per_solve << ",\n"
+             << "    \"persistent_grid_blocks\": "
+             << initial_backend_metrics.persistent_grid_blocks << ",\n"
+             << "    \"fused_operations_per_launch\": "
+             << initial_backend_metrics.fused_operations_per_launch << ",\n"
+             << "    \"scheduled_columns\": "
+             << initial_backend_metrics.scheduled_columns << ",\n"
+             << "    \"widest_operation_columns\": "
+             << initial_backend_metrics.widest_operation_columns << ",\n"
+             << "    \"narrow_operations_le_8_columns\": "
+             << initial_backend_metrics.narrow_operations << ",\n"
+             << "    \"numeric_factor_blocks\": "
+             << initial_backend_metrics.numeric_factor_blocks << ",\n";
+        write_refactor_dag_profile(json, initial_backend_metrics.numeric_factor_dag);
+        json << "    \"task1_phase_ms\": {\n";
+        write_timing(json, "cpu_numeric_pattern_bootstrap",
+                     backend_samples.cpu_bootstrap_factor, true, 6U);
+        write_timing(json, "gpu_setup", backend_samples.gpu_setup, true, 6U);
+        write_timing(json, "numeric_lu_cpu_prepare",
+                     backend_samples.numeric_factor_cpu_prepare, true, 6U);
+        write_timing(json, "numeric_lu_h2d", backend_samples.numeric_factor_h2d,
+                     true, 6U);
+        write_timing(json, "numeric_lu_kernel", backend_samples.numeric_factor_kernel,
+                     true, 6U);
+        write_timing(json, "numeric_lu_status_d2h",
+                     backend_samples.numeric_factor_status_d2h, true, 6U);
+        write_timing(json, "solve_cpu_prepare", backend_samples.solve_cpu_prepare, true, 6U);
+        write_timing(json, "solve_h2d", backend_samples.solve_h2d, true, 6U);
+        write_timing(json, "solve_kernel", backend_samples.solve_kernel, true, 6U);
+        write_timing(json, "solve_d2h", backend_samples.solve_d2h, true, 6U);
+        write_timing(json, "solve_cpu_finalize", backend_samples.solve_cpu_finalize, false, 6U);
+        json << "    }\n";
         json << "  },\n"
              << "  \"validation\": {\n"
              << "    \"relative_residual_l2\": " << residual << ",\n"

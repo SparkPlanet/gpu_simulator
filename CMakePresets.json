@@ -34,11 +34,37 @@
         "EDA_GPU_ENABLE_NGSPICE": "ON",
         "NGSPICE_EXECUTABLE": "${sourceDir}/build/tools/ngspice/bin/ngspice"
       }
+    },
+    {
+      "name": "cuda-debug",
+      "inherits": "base",
+      "displayName": "CUDA operators debug and correctness",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CUDA_ARCHITECTURES": "80;86",
+        "EDA_GPU_ENABLE_CUDA": "ON",
+        "EDA_GPU_ENABLE_NGSPICE": "ON",
+        "NGSPICE_EXECUTABLE": "${sourceDir}/build/tools/ngspice/bin/ngspice"
+      }
+    },
+    {
+      "name": "cuda-release",
+      "inherits": "base",
+      "displayName": "CUDA operators release build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_ARCHITECTURES": "80;86",
+        "EDA_GPU_ENABLE_CUDA": "ON",
+        "EDA_GPU_ENABLE_NGSPICE": "ON",
+        "NGSPICE_EXECUTABLE": "${sourceDir}/build/tools/ngspice/bin/ngspice"
+      }
     }
   ],
   "buildPresets": [
     { "name": "cpu-debug", "configurePreset": "cpu-debug" },
-    { "name": "cpu-release", "configurePreset": "cpu-release" }
+    { "name": "cpu-release", "configurePreset": "cpu-release" },
+    { "name": "cuda-debug", "configurePreset": "cuda-debug" },
+    { "name": "cuda-release", "configurePreset": "cuda-release" }
   ],
   "testPresets": [
     {
@@ -49,6 +75,16 @@
     {
       "name": "cpu-release",
       "configurePreset": "cpu-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "cuda-debug",
+      "configurePreset": "cuda-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "cuda-release",
+      "configurePreset": "cuda-release",
       "output": { "outputOnFailure": true }
     }
   ]

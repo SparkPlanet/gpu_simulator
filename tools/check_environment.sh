@@ -37,17 +37,19 @@ else
 fi
 
 echo
-echo "Optional future GPU tools"
+echo "CUDA operator/reference layer (required by cuda-debug/cuda-release presets)"
 if command -v nvcc >/dev/null 2>&1; then
     nvcc --version | tail -n 1
 else
-    echo "nvcc: not installed (not required in the current CPU phase)"
+    echo "nvcc: MISSING (CPU presets remain available)"
 fi
 if command -v nvidia-smi >/dev/null 2>&1; then
     if ! nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap \
         --format=csv,noheader; then
-        echo "NVIDIA GPU is not visible here (not required in the current CPU phase)."
+        echo "NVIDIA GPU is not visible in the current sandbox/device namespace."
     fi
+else
+    echo "nvidia-smi: MISSING (CPU presets remain available)"
 fi
 
 exit "${status}"
