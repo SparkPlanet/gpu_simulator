@@ -161,13 +161,8 @@ private:
 
 }  // namespace
 
-std::vector<BackendDescriptor> task1_backends() {
-    return {{"cpu-klu", true, "CPU baseline using the vendored ngspice KLU"}};
-}
-
-std::unique_ptr<Task1Backend> create_task1_backend(std::string_view name) {
-    if (name == "cpu-klu" || name == "klu") return std::make_unique<CpuKluBackend>();
-    throw std::runtime_error("unknown Task 1 backend: " + std::string(name));
+std::unique_ptr<Task1Backend> make_cpu_klu_backend() {
+    return std::make_unique<CpuKluBackend>();
 }
 
 }  // namespace eda_gpu

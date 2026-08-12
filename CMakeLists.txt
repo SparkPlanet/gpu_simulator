@@ -57,11 +57,14 @@ set_target_properties(task1_klu PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES
 
 add_library(eda_task1 STATIC
     src/matrix.cpp
+    src/analysis.cpp
     src/profiler.cpp
     src/executor.cpp
     src/task1.cpp
     src/report.cpp
+    src/backend_registry.cpp
     backends/cpu_klu.cpp
+    backends/reference_lu.cpp
 )
 target_include_directories(eda_task1
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -85,6 +88,9 @@ if(EDA_GPU_BUILD_TESTS)
     target_link_libraries(task1_tests PRIVATE eda_task1)
     add_test(NAME task1_infrastructure COMMAND task1_tests)
     add_test(NAME task1_benchmark_smoke COMMAND task1_benchmark --backend cpu-klu --grid 8)
-    set_tests_properties(task1_infrastructure task1_benchmark_smoke
-        PROPERTIES LABELS "task1;cpu;klu")
+    add_test(NAME task1_reference_smoke
+        COMMAND task1_benchmark --backend reference-lu --grid 8)
+    set_tests_properties(task1_infrastructure PROPERTIES LABELS "task1;cpu")
+    set_tests_properties(task1_benchmark_smoke PROPERTIES LABELS "task1;cpu;klu")
+    set_tests_properties(task1_reference_smoke PROPERTIES LABELS "task1;cpu;reference")
 endif()
