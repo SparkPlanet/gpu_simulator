@@ -101,6 +101,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>)
 endif()
 
+# The heterogeneous solver is developed as an independent target so the
+# current Task1 backends remain a stable, directly comparable baseline.
+add_subdirectory(heterogeneous)
+
 add_executable(task1_benchmark benchmark/task1_benchmark.cpp)
 target_link_libraries(task1_benchmark PRIVATE eda_task1)
 target_compile_definitions(task1_benchmark PRIVATE
