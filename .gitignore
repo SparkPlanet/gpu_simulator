@@ -2,6 +2,9 @@
 /artifacts/
 /.agents/
 /.codex/
+# Matrix Market inputs are local benchmark data. Several Task1 cases are
+# hundreds of MB to multiple GB and must not be committed to the source tree.
+*.mtx
 *.csv
 *.jsonl
 compile_commands.json

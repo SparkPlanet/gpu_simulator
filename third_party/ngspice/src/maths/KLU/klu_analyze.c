@@ -93,6 +93,7 @@ static Int analyze_worker       /* returns KLU_OK or < 0 if error */
         /* ------------------------------------------------------------------ */
 
         Lnz [block] = EMPTY ;
+        Symbolic->Symmetry [block] = EMPTY ;
         pc = 0 ;
         for (k = k1 ; k < k2 ; k++)
         {
@@ -161,6 +162,7 @@ static Int analyze_worker       /* returns KLU_OK or < 0 if error */
             /* get the ordering statistics from AMD */
             lnz1 = (Int) (amd_Info [AMD_LNZ]) + nk ;
             flops1 = 2 * amd_Info [AMD_NMULTSUBS_LU] + amd_Info [AMD_NDIV] ;
+            Symbolic->Symmetry [block] = amd_Info [AMD_SYMMETRY] ;
             if (pc == maxnz)
             {
                 /* get the symmetry of the biggest block */

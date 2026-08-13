@@ -28,6 +28,7 @@ Int KLU_free_symbolic
     KLU_free (Symbolic->Q, n, sizeof (Int), Common) ;
     KLU_free (Symbolic->R, n+1, sizeof (Int), Common) ;
     KLU_free (Symbolic->Lnz, n, sizeof (double), Common) ;
+    KLU_free (Symbolic->Symmetry, n, sizeof (double), Common) ;
     KLU_free (Symbolic, 1, sizeof (KLU_symbolic), Common) ;
     *SymbolicHandle = NULL ;
     return (TRUE) ;

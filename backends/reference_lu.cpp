@@ -41,7 +41,7 @@ public:
 
         statistics_.attributes["algorithm"] = "fixed-pivot row-oriented sparse LU";
         statistics_.attributes["analysis"] =
-            "CPU BTF+AMD ordering+self-owned symbolic LU";
+            "CPU KLU BTF+AMD + blockwise elimination-tree/generic symbolic";
         statistics_.attributes["execution_space"] = "host reference";
         statistics_.attributes["factor_storage"] = "combined CSR L/U";
         statistics_.attributes["lookup"] = std::string(to_string(plan_.lookup.kind));
@@ -56,6 +56,10 @@ public:
             static_cast<double>(plan_.factor_nonzeros()) / plan_.input_nonzeros;
         statistics_.values["analysis_plan_bytes"] = plan_.storage_bytes();
         statistics_.values["btf_blocks"] = plan_.block_offsets.size() - 1U;
+        statistics_.values["structurally_symmetric_btf_blocks"] = std::count(
+            plan_.structurally_symmetric_blocks.begin(),
+            plan_.structurally_symmetric_blocks.end(),
+            std::uint8_t{1});
         SparseIndex largest_block{};
         for (std::size_t block = 0; block + 1U < plan_.block_offsets.size(); ++block) {
             largest_block = std::max(

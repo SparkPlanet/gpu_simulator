@@ -60,6 +60,68 @@ void require(bool condition, std::string_view message) {
     return nullptr;
 }
 
+[[nodiscard]] bool backend_available(std::string_view name) {
+    for (const auto& descriptor : eda_gpu::task1_backends()) {
+        if (descriptor.name == name) return descriptor.available;
+    }
+    return false;
+}
+
+[[nodiscard]] eda_gpu::CscMatrix make_nonsymmetric_test_matrix() {
+    eda_gpu::CscMatrix matrix;
+    matrix.dimension = 6;
+    // Diagonally dominant, nonsymmetric CSC matrix with a nontrivial graph.
+    matrix.column_offsets = {0, 3, 6, 9, 12, 15, 18};
+    matrix.row_indices = {
+        0, 1, 4,
+        0, 1, 2,
+        1, 2, 3,
+        0, 3, 4,
+        2, 4, 5,
+        1, 3, 5,
+    };
+    matrix.values = {
+        9.0, -1.0, 0.5,
+        2.0, 10.0, -2.0,
+        1.0, 8.0, -1.0,
+        -0.5, 11.0, 2.0,
+        1.5, 12.0, -1.0,
+        0.25, -2.0, 9.0,
+    };
+    matrix.validate();
+    return matrix;
+}
+
+[[nodiscard]] eda_gpu::CscMatrix make_nearly_symmetric_test_matrix() {
+    constexpr eda_gpu::SparseIndex dimension = 256;
+    eda_gpu::CscMatrix matrix;
+    matrix.dimension = dimension;
+    matrix.column_offsets.reserve(static_cast<std::size_t>(dimension) + 1U);
+    matrix.column_offsets.push_back(0);
+    for (eda_gpu::SparseIndex column = 0; column < dimension; ++column) {
+        // One directed second-neighbor entry makes the large BTF block
+        // nonsymmetric while retaining a cheap symmetric envelope.
+        if (column == 2) {
+            matrix.row_indices.push_back(0);
+            matrix.values.push_back(0.125);
+        }
+        if (column > 0) {
+            matrix.row_indices.push_back(column - 1);
+            matrix.values.push_back(-1.0);
+        }
+        matrix.row_indices.push_back(column);
+        matrix.values.push_back(8.0);
+        if (column + 1 < dimension) {
+            matrix.row_indices.push_back(column + 1);
+            matrix.values.push_back(-1.0);
+        }
+        matrix.column_offsets.push_back(
+            static_cast<eda_gpu::SparseIndex>(matrix.row_indices.size()));
+    }
+    matrix.validate();
+    return matrix;
+}
+
 void test_profiler_and_executor() {
     eda_gpu::Profiler profiler;
     auto host = eda_gpu::make_host_executor(profiler);
@@ -156,33 +218,70 @@ void test_reference_lu_pipeline() {
 }
 
 void test_reference_lu_nonsymmetric_permutations() {
-    eda_gpu::CscMatrix matrix;
-    matrix.dimension = 6;
-    // Diagonally dominant, nonsymmetric CSC matrix with a nontrivial graph.
-    matrix.column_offsets = {0, 3, 6, 9, 12, 15, 18};
-    matrix.row_indices = {
-        0, 1, 4,
-        0, 1, 2,
-        1, 2, 3,
-        0, 3, 4,
-        2, 4, 5,
-        1, 3, 5,
-    };
-    matrix.values = {
-        9.0, -1.0, 0.5,
-        2.0, 10.0, -2.0,
-        1.0, 8.0, -1.0,
-        -0.5, 11.0, 2.0,
-        1.5, 12.0, -1.0,
-        0.25, -2.0, 9.0,
-    };
-    matrix.validate();
+    auto matrix = make_nonsymmetric_test_matrix();
     const std::vector<double> expected{1.0, -2.0, 3.0, -4.0, 5.0, -6.0};
     const auto right_hand_side = eda_gpu::multiply(matrix, expected);
     const eda_gpu::Task1Pipeline pipeline("reference-lu");
     const auto result = pipeline.run({matrix, right_hand_side});
     require(eda_gpu::relative_residual_l2(matrix, result.solution, right_hand_side) < 1e-13,
             "reference LU permutation handling is incorrect");
+}
+
+void test_reference_lu_symmetrized_envelope() {
+    auto matrix = make_nearly_symmetric_test_matrix();
+    const std::vector<double> expected(
+        static_cast<std::size_t>(matrix.dimension), 1.0);
+    const auto right_hand_side = eda_gpu::multiply(matrix, expected);
+    const eda_gpu::Task1Pipeline pipeline("reference-lu");
+    const auto result = pipeline.run({matrix, right_hand_side});
+    require(
+        eda_gpu::relative_residual_l2(matrix, result.solution, right_hand_side) < 1e-13,
+        "symmetrized-envelope LU residual is too large");
+    const auto* symbolic = find_event(result.report.events, "symbolic_lu");
+    require(symbolic != nullptr, "symmetrized-envelope symbolic event is missing");
+    const auto selected = symbolic->values.find("symmetrized_envelope_btf_blocks");
+    require(
+        selected != symbolic->values.end() && selected->second > 0.0,
+        "adaptive symbolic policy did not exercise the symmetrized envelope");
+}
+
+void test_cuda_right_looking_nonsymmetric() {
+    if (!backend_available("cuda-right-looking-lu")) return;
+    auto matrix = make_nonsymmetric_test_matrix();
+    const std::vector<double> expected{1.0, -2.0, 3.0, -4.0, 5.0, -6.0};
+    const auto right_hand_side = eda_gpu::multiply(matrix, expected);
+    const eda_gpu::Task1Pipeline pipeline("cuda-right-looking-lu");
+    const auto result = pipeline.run({matrix, right_hand_side});
+    require(
+        eda_gpu::relative_residual_l2(matrix, result.solution, right_hand_side) < 1e-12,
+        "CUDA right-looking LU dependency handling is incorrect");
+    require(find_event(result.report.events, "right_looking_plan_build") != nullptr,
+            "CUDA right-looking dependency analysis event is missing");
+    require(find_event(result.report.events, "cuda_numeric_lu") != nullptr,
+            "CUDA right-looking numerical LU event is missing");
+    require(
+        result.report.backend_statistics.values.at(
+            "right_looking_additional_double_u_edges") > 0.0,
+        "nonsymmetric CUDA test did not exercise a double-U dependency");
+    const auto& statistics = result.report.backend_statistics;
+    require(
+        statistics.values.at("factor_kernel_theoretical_occupancy_percent") > 0.0 &&
+            statistics.values.at("factor_kernel_theoretical_occupancy_percent") <= 100.0,
+        "CUDA factor theoretical occupancy is missing or invalid");
+    require(
+        statistics.values.at("forward_solve_kernel_theoretical_occupancy_percent") > 0.0,
+        "CUDA solve theoretical occupancy is missing");
+    require(
+        statistics.values.at("factor_grid_profiled_launches") > 0.0,
+        "CUDA factor grid saturation statistics are missing");
+    require(
+        statistics.attributes.at("achieved_occupancy_collection") ==
+            "Nsight Compute or CUPTI required",
+        "CUDA report does not distinguish theoretical and achieved occupancy");
+    require(
+        statistics.attributes.at("vram_bandwidth_metric") ==
+            "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed",
+        "CUDA report does not identify the external VRAM bandwidth metric");
 }
 
 }  // namespace
@@ -193,6 +292,8 @@ int main() {
         test_task1_pipeline();
         test_reference_lu_pipeline();
         test_reference_lu_nonsymmetric_permutations();
+        test_reference_lu_symmetrized_envelope();
+        test_cuda_right_looking_nonsymmetric();
         std::cout << "Task 1 infrastructure tests passed\n";
         return 0;
     } catch (const std::exception& error) {

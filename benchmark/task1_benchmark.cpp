@@ -45,6 +45,9 @@ constexpr CaseDescriptor kCases[]{
     {"asic_320k", 321821, 2635364, "SuiteSparse/Sandia"},
     {"asic_680k", 682862, 3871773, "SuiteSparse/Sandia"},
     {"circuit5m_dc", 3523317, 19194193, "SuiteSparse/Freescale"},
+    {"circuit5m", 5558326, 59524291, "SuiteSparse/Freescale"},
+    {"fullchip", 2987012, 26621990, "SuiteSparse/Freescale"},
+    {"freescale2", 2999349, 23042677, "SuiteSparse/Freescale"},
 };
 
 [[nodiscard]] std::string escape_json(std::string_view value) {

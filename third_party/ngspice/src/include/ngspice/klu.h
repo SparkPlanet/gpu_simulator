@@ -32,6 +32,7 @@ typedef struct
     double est_flops ;  /* est. factorization flop count */
     double lnz, unz ;   /* estimated nz in L and U, including diagonals */
     double *Lnz ;       /* size n, but only Lnz [0..nblocks-1] is used */
+    double *Symmetry ;  /* per-block pattern symmetry; -1 if unavailable */
 
     /* computed for all orderings: */
     int
@@ -56,7 +57,7 @@ typedef struct
 typedef struct          /* 64-bit version (otherwise same as above) */
 {
     double symmetry, est_flops, lnz, unz ;
-    double *Lnz ;
+    double *Lnz, *Symmetry ;
     UF_long n, nz, *P, *Q, *R, nzoff, nblocks, maxblock, ordering, do_btf,
         structural_rank ;
 

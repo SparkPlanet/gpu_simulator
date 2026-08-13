@@ -121,6 +121,7 @@ KLU_symbolic *KLU_alloc_symbolic
     Symbolic->Q = Q ;
     Symbolic->R = R ;
     Symbolic->Lnz = Lnz ;
+    Symbolic->Symmetry = KLU_malloc (n, sizeof (double), Common) ;
 
     if (Common->status < KLU_OK)
     {
@@ -128,6 +129,11 @@ KLU_symbolic *KLU_alloc_symbolic
         KLU_free_symbolic (&Symbolic, Common) ;
         Common->status = KLU_OUT_OF_MEMORY ;
         return (NULL) ;
+    }
+
+    for (i = 0 ; i < n ; i++)
+    {
+        Symbolic->Symmetry [i] = EMPTY ;
     }
 
     return (Symbolic) ;
